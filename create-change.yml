@@ -1,0 +1,36 @@
+name: Create change record
+
+on:
+  workflow_dispatch:
+    inputs:
+      short_description:
+        description: "Change title"
+        default: "Test change from GitHub Actions"
+
+jobs:
+  create-change:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create change in ServiceNow
+        env:
+          SN_INSTANCE: ${{ secrets.SN_INSTANCE }}
+          SN_AUTH: ${{ secrets.SN_USERNAME }}:${{ secrets.SN_PASSWORD }}
+          TITLE: ${{ inputs.short_description }}
+        run: |
+          body=$(jq -n --arg t "$TITLE" --arg run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{short_description:$t, description:("Created by GitHub Actions: " + $run), category:"Software"}')
+
+          resp=$(curl -s -w "\n%{http_code}" -u "$SN_AUTH" \
+            -H "Accept: application/json" -H "Content-Type: application/json" \
+            -X POST "$SN_INSTANCE/api/sn_chg_rest/change/normal" -d "$body")
+
+          code=$(echo "$resp" | tail -n1)
+          json=$(echo "$resp" | sed '$d')
+          echo "HTTP $code"
+          [[ "$code" == 2* ]] || { echo "$json"; exit 1; }
+
+          number=$(echo "$json" | jq -r .result.number.value)
+          sys_id=$(echo "$json" | jq -r .result.sys_id.value)
+          echo "Created $number ($sys_id)"
+          echo "### Created $number" >> "$GITHUB_STEP_SUMMARY"
+          echo "$SN_INSTANCE/change_request.do?sys_id=$sys_id" >> "$GITHUB_STEP_SUMMARY"
